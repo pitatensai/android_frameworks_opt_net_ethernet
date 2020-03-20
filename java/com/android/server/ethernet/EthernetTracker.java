@@ -16,6 +16,8 @@
 
 package com.android.server.ethernet;
 
+import static android.net.TestNetworkManager.TEST_TAP_PREFIX;
+
 import android.annotation.Nullable;
 import android.content.Context;
 import android.net.IEthernetServiceListener;
@@ -68,8 +70,12 @@ final class EthernetTracker {
     private final static String TAG = EthernetTracker.class.getSimpleName();
     private final static boolean DBG = EthernetNetworkFactory.DBG;
 
-    /** Product-dependent regular expression of interface names we track. */
-    private final String mIfaceMatch;
+    /**
+     * Interface names we track. This is a product-dependent regular expression, plus,
+     * if setIncludeTestInterfaces is true, any test interfaces.
+     */
+    private String mIfaceMatch;
+    private boolean mIncludeTestInterfaces = false;
 
     /** Mapping between {iface name | mac address} -> {NetworkCapabilities} */
     private final ConcurrentHashMap<String, NetworkCapabilities> mNetworkCapabilities =
@@ -111,8 +117,7 @@ final class EthernetTracker {
         mNMService = INetworkManagementService.Stub.asInterface(b);
 
         // Interface match regex.
-        mIfaceMatch = context.getResources().getString(
-                com.android.internal.R.string.config_ethernet_iface_regex);
+        updateIfaceMatchRegexp();
 
         // Read default Ethernet interface configuration from resources
         final String[] interfaceConfigs = context.getResources().getStringArray(
@@ -187,6 +192,12 @@ final class EthernetTracker {
         mListeners.unregister(listener);
     }
 
+    public void setIncludeTestInterfaces(boolean include) {
+        mIncludeTestInterfaces = include;
+        updateIfaceMatchRegexp();
+        trackAvailableInterfaces();
+    }
+
     public void requestTetheredInterface(ITetheredInterfaceCallback callback) {
         mHandler.post(() -> {
             if (!mTetheredInterfaceRequests.register(callback)) {
@@ -229,17 +240,17 @@ final class EthernetTracker {
 
     private void maybeUntetherDefaultInterface() {
         if (mTetheredInterfaceRequests.getRegisteredCallbackCount() > 0) return;
-        // mDefaultInterface null means that there never was a default interface (it is never set
-        // to null).
-        if (mDefaultInterfaceMode == INTERFACE_MODE_CLIENT || mDefaultInterface == null) return;
-
+        if (mDefaultInterfaceMode == INTERFACE_MODE_CLIENT) return;
         setDefaultInterfaceMode(INTERFACE_MODE_CLIENT);
     }
 
     private void setDefaultInterfaceMode(int mode) {
+        Log.d(TAG, "Setting default interface mode to " + mode);
         mDefaultInterfaceMode = mode;
-        removeInterface(mDefaultInterface);
-        addInterface(mDefaultInterface);
+        if (mDefaultInterface != null) {
+            removeInterface(mDefaultInterface);
+            addInterface(mDefaultInterface);
+        }
     }
 
     private int getInterfaceMode(final String iface) {
@@ -251,6 +262,14 @@ final class EthernetTracker {
 
     private void removeInterface(String iface) {
         mFactory.removeInterface(iface);
+        maybeUpdateServerModeInterfaceState(iface, false);
+    }
+
+    private void stopTrackingInterface(String iface) {
+        removeInterface(iface);
+        if (iface.equals(mDefaultInterface)) {
+            mDefaultInterface = null;
+        }
     }
 
     private void addInterface(String iface) {
@@ -290,6 +309,8 @@ final class EthernetTracker {
 
             Log.d(TAG, "Started tracking interface " + iface);
             mFactory.addInterface(iface, hwAddress, nc, ipConfiguration);
+        } else {
+            maybeUpdateServerModeInterfaceState(iface, true);
         }
 
         // Note: if the interface already has link (e.g., if we crashed and got
@@ -323,12 +344,9 @@ final class EthernetTracker {
             }
             mListeners.finishBroadcast();
         }
-
-        updateServerModeInterfaceState(iface, up, mode);
     }
 
-    private void updateServerModeInterfaceState(String iface, boolean up, int mode) {
-        final boolean available = up && (mode == INTERFACE_MODE_SERVER);
+    private void maybeUpdateServerModeInterfaceState(String iface, boolean available) {
         if (available == mTetheredInterfaceWasAvailable || !iface.equals(mDefaultInterface)) return;
 
         final int pendingCbs = mTetheredInterfaceRequests.beginBroadcast();
@@ -348,7 +366,8 @@ final class EthernetTracker {
         if (DBG) Log.i(TAG, "maybeTrackInterface " + iface);
         // If we don't already track this interface, and if this interface matches
         // our regex, start tracking it.
-        if (!iface.matches(mIfaceMatch) || mFactory.hasInterface(iface)) {
+        if (!iface.matches(mIfaceMatch) || mFactory.hasInterface(iface)
+                || iface.equals(mDefaultInterface)) {
             return;
         }
 
@@ -394,7 +413,7 @@ final class EthernetTracker {
 
         @Override
         public void interfaceRemoved(String iface) {
-            mHandler.post(() -> removeInterface(iface));
+            mHandler.post(() -> stopTrackingInterface(iface));
         }
     }
 
@@ -572,6 +591,15 @@ final class EthernetTracker {
         return new IpConfiguration(IpAssignment.DHCP, ProxySettings.NONE, null, null);
     }
 
+    private void updateIfaceMatchRegexp() {
+        final String match = mContext.getResources().getString(
+                com.android.internal.R.string.config_ethernet_iface_regex);
+        mIfaceMatch = mIncludeTestInterfaces
+                ? "(" + match + "|" + TEST_TAP_PREFIX + "\\d+)"
+                : match;
+        Log.d(TAG, "Interface match regexp set to '" + mIfaceMatch + "'");
+    }
+
     private void postAndWaitForRunnable(Runnable r) {
         mHandler.runWithScissors(r, 2000L /* timeout */);
     }
@@ -582,6 +610,8 @@ final class EthernetTracker {
             pw.println("Ethernet interface name filter: " + mIfaceMatch);
             pw.println("Default interface: " + mDefaultInterface);
             pw.println("Default interface mode: " + mDefaultInterfaceMode);
+            pw.println("Tethered interface requests: "
+                    + mTetheredInterfaceRequests.getRegisteredCallbackCount());
             pw.println("Listeners: " + mListeners.getRegisteredCallbackCount());
             pw.println("IP Configurations:");
             pw.increaseIndent();
