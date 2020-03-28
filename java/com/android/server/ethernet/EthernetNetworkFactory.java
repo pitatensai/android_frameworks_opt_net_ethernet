@@ -391,7 +391,7 @@ public class EthernetNetworkFactory extends NetworkFactory {
         }
 
         boolean isRestricted() {
-            return mCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED);
+            return !mCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED);
         }
 
         /**
@@ -481,7 +481,7 @@ public class EthernetNetworkFactory extends NetworkFactory {
             };
             mNetworkAgent.register();
             mNetworkAgent.setLegacyExtraInfo(mHwAddress);
-            mNetworkAgent.setConnected();
+            mNetworkAgent.markConnected();
         }
 
         void onIpLayerStopped(LinkProperties linkProperties) {
