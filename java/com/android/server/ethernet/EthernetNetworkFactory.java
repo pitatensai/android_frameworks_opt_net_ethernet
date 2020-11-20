@@ -50,6 +50,13 @@ import android.text.TextUtils;
 import android.util.AndroidRuntimeException;
 import android.util.Log;
 import android.util.SparseArray;
+import java.io.File;
+import java.io.BufferedReader;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
 
 import com.android.internal.util.IndentingPrintWriter;
 
@@ -599,9 +606,45 @@ public class EthernetNetworkFactory extends NetworkFactory {
             }
         }
 
+        private String ReadFromFile(File file) {
+            if((file != null) && file.exists()) {
+                try {
+                    FileInputStream fin= new FileInputStream(file);
+                    BufferedReader reader= new BufferedReader(new InputStreamReader(fin));
+                    String flag = reader.readLine();
+                    fin.close();
+                    return flag;
+                } catch(Exception e) {
+                    e.printStackTrace();
+                }
+            }
+            return null;
+        }
+
+        int getCarrierState(String ifname) {
+            if(ifname != "") {
+                try {
+                    File file = new File("/sys/class/net/" + ifname + "/carrier");
+                    String carrier = ReadFromFile(file);
+                    return Integer.parseInt(carrier);
+                } catch(Exception e) {
+                    e.printStackTrace();
+                    return 0;
+                }
+            } else {
+                return 0;
+            }
+        }
+
         /** Returns true if state has been modified */
         boolean updateLinkState(boolean up) {
             if (mLinkUp == up) return false;
+
+            if (up && getCarrierState(name) != 1) {
+                Log.d(TAG, name + " fake link up");
+                return false;
+            }
+
             mLinkUp = up;
 
             stop();
