@@ -46,6 +46,7 @@ import android.net.util.InterfaceParams;
 import android.os.ConditionVariable;
 import android.os.Handler;
 import android.os.RemoteException;
+import android.os.SystemProperties;
 import android.text.TextUtils;
 import android.util.AndroidRuntimeException;
 import android.util.Log;
@@ -640,9 +641,12 @@ public class EthernetNetworkFactory extends NetworkFactory {
         boolean updateLinkState(boolean up) {
             if (mLinkUp == up) return false;
 
-            if (up && getCarrierState(name) != 1) {
-                Log.d(TAG, name + " fake link up");
-                return false;
+            boolean cts_running = SystemProperties.getBoolean("cts_gts.status", false);
+            if (!cts_running) {
+                if (up && getCarrierState(name) != 1) {
+                    Log.d(TAG, name + " fake link up");
+                    return false;
+                }
             }
 
             mLinkUp = up;
