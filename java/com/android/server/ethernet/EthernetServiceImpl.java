@@ -139,7 +139,6 @@ public class EthernetServiceImpl extends IEthernetManager.Stub {
         return mTracker.isTrackingInterface(iface);
     }
 
-    @Override
     public String getIpAddress(String iface) {
         enforceAccessPermission();
 
@@ -150,7 +149,6 @@ public class EthernetServiceImpl extends IEthernetManager.Stub {
         return mTracker.getIpAddress(iface);
     }
 
-    @Override
     public String getNetmask(String iface) {
         enforceAccessPermission();
 
@@ -161,7 +159,6 @@ public class EthernetServiceImpl extends IEthernetManager.Stub {
         return mTracker.getNetmask(iface);
     }
 
-    @Override
     public String getGateway(String iface) {
         enforceAccessPermission();
 
@@ -172,7 +169,6 @@ public class EthernetServiceImpl extends IEthernetManager.Stub {
         return mTracker.getGateway(iface);
     }
 
-    @Override
     public String getDns(String iface) {
         enforceAccessPermission();
 
