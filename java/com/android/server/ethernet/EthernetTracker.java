@@ -44,6 +44,10 @@ import com.android.internal.util.IndentingPrintWriter;
 import com.android.server.net.BaseNetworkObserver;
 
 import java.io.FileDescriptor;
+import java.io.File;
+import java.io.BufferedReader;
+import java.io.FileInputStream;
+import java.io.InputStreamReader;
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
@@ -90,6 +94,10 @@ final class EthernetTracker {
     private final Handler mHandler;
     private final EthernetNetworkFactory mFactory;
     private final EthernetConfigStore mConfigStore;
+    private static String mIface = "";
+    private static String mIface_1 = "eth0";
+    private static String mIface_2 = "eth1";
+    private EthernetNetworkFactoryExt mEthernetNetworkFactoryExt;
 
     private final RemoteCallbackList<IEthernetServiceListener> mListeners =
             new RemoteCallbackList<>();
@@ -133,6 +141,7 @@ final class EthernetTracker {
         NetworkCapabilities nc = createNetworkCapabilities(true /* clear default capabilities */);
         mFactory = new EthernetNetworkFactory(handler, context, nc);
         mFactory.register();
+        mEthernetNetworkFactoryExt = new EthernetNetworkFactoryExt();
     }
 
     void start() {
@@ -343,6 +352,8 @@ final class EthernetTracker {
     }
 
     private void updateInterfaceState(String iface, boolean up) {
+    if (!mIface.equals(iface))
+    	return ;    
         final int mode = getInterfaceMode(iface);
         final boolean factoryLinkStateUpdated = (mode == INTERFACE_MODE_CLIENT)
                 && mFactory.updateInterfaceLinkState(iface, up);
@@ -410,6 +421,7 @@ final class EthernetTracker {
         }
 
         addInterface(iface);
+        mEthernetNetworkFactoryExt.start(mContext, mNMService);
     }
 
     private void trackAvailableInterfaces() {
@@ -431,17 +443,51 @@ final class EthernetTracker {
             if (DBG) {
                 Log.i(TAG, "interfaceLinkStateChanged, iface: " + iface + ", up: " + up);
             }
+            if (getEthernetCarrierState(mIface_1) == 1 && up) {
+                if (getEthernetCarrierState(mIface_2) == 1 && mIface_1.equals(iface)) {
+                    mHandler.post(() -> updateInterfaceState(mIface_2, false));
+                    try {
+                        Thread.sleep(2000);
+                    } catch (InterruptedException ignore) {
+                    }
+                    mHandler.post(() -> mEthernetNetworkFactoryExt.interfaceLinkStateChanged(mIface_2, true));
+                }
+                mIface = mIface_1;
+            }
+            if(getEthernetCarrierState(mIface_1) == 0 && !up) {
+                if (getEthernetCarrierState(mIface_2) == 1 && mIface_1.equals(iface)) {
+                    mHandler.post(() -> updateInterfaceState(mIface_1, false));
+                    mHandler.post(() -> mEthernetNetworkFactoryExt.interfaceLinkStateChanged(mIface_2, false));
+                    try {
+                        Thread.sleep(2000);
+                    } catch (InterruptedException ignore) {
+                    }
+                }
+                if (getEthernetCarrierState(mIface_2) == 1) {
+                    mIface = mIface_2;
+                    mHandler.post(() -> updateInterfaceState(mIface_2, true));
+                    return ;
+                }
+            }
+            if (getEthernetCarrierState(mIface_1) == 0 && getEthernetCarrierState(mIface_2) == 1 && up)
+                mIface = mIface_2;
+
             mHandler.post(() -> updateInterfaceState(iface, up));
+            if (getEthernetCarrierState(mIface_1) == 1) {
+                    mHandler.post(() -> mEthernetNetworkFactoryExt.interfaceLinkStateChanged(iface, up));
+            }
         }
 
         @Override
         public void interfaceAdded(String iface) {
             mHandler.post(() -> maybeTrackInterface(iface));
+            mHandler.post(() -> mEthernetNetworkFactoryExt.interfaceAdded(iface));
         }
 
         @Override
         public void interfaceRemoved(String iface) {
             mHandler.post(() -> stopTrackingInterface(iface));
+            mHandler.post(() -> mEthernetNetworkFactoryExt.interfaceRemoved(iface));
         }
     }
 
@@ -637,6 +683,37 @@ final class EthernetTracker {
                 ? "(" + match + "|" + TEST_IFACE_REGEXP + ")"
                 : match;
         Log.d(TAG, "Interface match regexp set to '" + mIfaceMatch + "'");
+    }
+
+
+    private String ReadFromFile(File file) {
+        if((file != null) && file.exists()) {
+            try {
+                FileInputStream fin= new FileInputStream(file);
+                BufferedReader reader= new BufferedReader(new InputStreamReader(fin));
+                String flag = reader.readLine();
+                fin.close();
+                return flag;
+            } catch(Exception e) {
+                e.printStackTrace();
+            }
+        }
+        return null;
+    }
+
+    public int getEthernetCarrierState(String ifname) {
+        if(ifname != "") {
+            try {
+                File file = new File("/sys/class/net/" + ifname + "/carrier");
+                String carrier = ReadFromFile(file);
+                return Integer.parseInt(carrier);
+            } catch(Exception e) {
+                e.printStackTrace();
+                return 0;
+            }
+        } else {
+            return 0;
+        }
     }
 
     private void postAndWaitForRunnable(Runnable r) {
